@@ -7,13 +7,12 @@
 #include <condition_variable>
 #include <atomic>
 #include <boost/asio/ip/address.hpp>
-#include <curl/curl.h> // For public IP retrieval
+#include <curl/curl.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
 using boost::asio::ip::udp;
 
-// Utility function to get public IP address using an external service
 std::string get_public_ip() {
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -24,7 +23,6 @@ std::string get_public_ip() {
     std::string public_ip;
     CURLcode res;
 
-    // Set cURL options
     curl_easy_setopt(curl, CURLOPT_URL, "https://api.ipify.org");
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](char* ptr, size_t size, size_t nmemb, void* userdata) -> size_t {
         std::string* data = static_cast<std::string*>(userdata);
@@ -32,8 +30,8 @@ std::string get_public_ip() {
         return size * nmemb;
     });
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &public_ip);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "ChatApplication/1.0"); // Optional: Set a custom user agent
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // Set a timeout of 10 seconds
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "ChatApplication/1.0"); 
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
     res = curl_easy_perform(curl);
 
@@ -43,7 +41,6 @@ std::string get_public_ip() {
         return "";
     }
 
-    // Verify that the response is a valid IP address
     boost::system::error_code ec;
     boost::asio::ip::address addr = boost::asio::ip::make_address(public_ip, ec);
     if (ec) {
@@ -56,11 +53,10 @@ std::string get_public_ip() {
     return public_ip;
 }
 
-// Function to automatically retrieve the internal IP address
 std::string get_internal_ip() {
     struct ifaddrs *ifaddr, *ifa;
     char host[NI_MAXHOST];
-    std::string internal_ip = "0.0.0.0"; // Default IP
+    std::string internal_ip = "0.0.0.0"; 
 
     if (getifaddrs(&ifaddr) == -1) {
         std::cerr << "Error retrieving network interfaces." << std::endl;
@@ -71,8 +67,7 @@ std::string get_internal_ip() {
         if (ifa->ifa_addr == NULL)
             continue;
 
-        if (ifa->ifa_addr->sa_family == AF_INET) { // IPv4
-            // Skip loopback interface
+        if (ifa->ifa_addr->sa_family == AF_INET) {
             if (std::string(ifa->ifa_name) == "lo0")
                 continue;
 
@@ -89,16 +84,13 @@ std::string get_internal_ip() {
     return internal_ip;
 }
 
-// Shared variables for host to store client endpoint
 std::mutex peer_mutex;
 udp::endpoint peer_endpoint;
 bool peer_set = false;
 std::condition_variable peer_cv;
 
-// Atomic flag to signal termination
 std::atomic<bool> terminate_flag(false);
 
-// Function to listen for incoming messages
 void listen_for_messages(udp::socket& socket, bool is_host) {
     char buffer[1024];
     udp::endpoint sender_endpoint;
@@ -114,7 +106,6 @@ void listen_for_messages(udp::socket& socket, bool is_host) {
                       << ":" << sender_endpoint.port() << "] " << message << std::endl;
 
             if (is_host) {
-                // If peer not set yet, set the client endpoint
                 std::unique_lock<std::mutex> lock(peer_mutex);
                 if (!peer_set) {
                     peer_endpoint = sender_endpoint;
@@ -131,7 +122,6 @@ void listen_for_messages(udp::socket& socket, bool is_host) {
     }
 }
 
-// Function to send messages (Sender Loop)
 void send_messages(udp::socket& socket, bool is_host, udp::endpoint host_endpoint = udp::endpoint()) {
     while (!terminate_flag.load()) {
         std::string message;
@@ -142,13 +132,12 @@ void send_messages(udp::socket& socket, bool is_host, udp::endpoint host_endpoin
 
         if (message == "/quit") {
             terminate_flag.store(true);
-            socket.cancel(); // Interrupt the listener thread
+            socket.cancel();
             break;
         }
 
         boost::system::error_code ignored_error;
         if (is_host) {
-            // Wait until peer_endpoint is set
             std::unique_lock<std::mutex> lock(peer_mutex);
             peer_cv.wait(lock, [] { return peer_set || terminate_flag.load(); });
 
@@ -158,7 +147,6 @@ void send_messages(udp::socket& socket, bool is_host, udp::endpoint host_endpoin
                 std::cerr << "No client connected to send messages.\n";
             }
         } else {
-            // Client knows host's endpoint
             socket.send_to(boost::asio::buffer(message), host_endpoint, 0, ignored_error);
         }
     }
@@ -171,7 +159,7 @@ int main() {
         std::cout << "Are you the host? (y/n): ";
         char is_host_char;
         std::cin >> is_host_char;
-        std::cin.ignore(); // Ignore leftover newline
+        std::cin.ignore();
 
         bool is_host = (is_host_char == 'y' || is_host_char == 'Y');
 
@@ -182,7 +170,6 @@ int main() {
         static std::set<unsigned short> used_ports;
         unsigned short assigned_port = 0;
 
-        // Assign an available port dynamically
         for (unsigned short port = start_port; port <= end_port; ++port) {
             if (used_ports.find(port) == used_ports.end()) {
                 assigned_port = port;
@@ -220,7 +207,7 @@ int main() {
 
         std::cout << "Assigned port: " << assigned_port << std::endl;
 
-        udp::endpoint host_endpoint; // For client to store host's endpoint
+        udp::endpoint host_endpoint;
 
         if (is_host) {
             std::cout << "Fetching public IP address...\n";
@@ -229,7 +216,6 @@ int main() {
 
             if (host_ip.empty()) {
                 std::cerr << "Failed to get public IP address." << std::endl;
-                // Proceeding without public IP
             }
 
             std::string internal_ip = get_internal_ip();
@@ -256,9 +242,8 @@ int main() {
             std::cout << "Do you want to connect using (1) Public IP or (2) Internal IP? Enter 1 or 2: ";
             int choice;
             std::cin >> choice;
-            std::cin.ignore();  // Ignore any leftover newline character
+            std::cin.ignore();
 
-            // Input Validation Loop for IP Address
             while (true) {
                 if (choice == 1) {
                     std::cout << "Enter the host's public IP address: ";
@@ -273,7 +258,6 @@ int main() {
 
                 std::cin >> peer_ip;
 
-                // Validate IP Address
                 boost::system::error_code ec;
                 boost::asio::ip::address addr = boost::asio::ip::make_address(peer_ip, ec);
                 if (ec) {
@@ -281,7 +265,7 @@ int main() {
                     continue;
                 }
 
-                host_endpoint = udp::endpoint(addr, 0); // Port will be set below
+                host_endpoint = udp::endpoint(addr, 0);
                 break;
             }
 
@@ -291,12 +275,11 @@ int main() {
                 std::cin.clear();
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             }
-            std::cin.ignore();  // Ignore any leftover newline character
+            std::cin.ignore();
 
-            host_endpoint.port(peer_port); // Set the correct port
+            host_endpoint.port(peer_port);
 
             try {
-                // Send a test message to confirm connection
                 std::string test_message = "Hello from client!";
                 socket.send_to(boost::asio::buffer(test_message), host_endpoint);
                 std::cout << "Test message sent to " << peer_ip << ":" << peer_port << std::endl;
@@ -306,12 +289,9 @@ int main() {
             }
         }
 
-        // Start listener thread
         std::thread listener_thread(listen_for_messages, std::ref(socket), is_host);
 
-        // Sending loop (Main Thread)
         if (is_host) {
-            // Host needs to wait until a client connects
             std::unique_lock<std::mutex> lock(peer_mutex);
             peer_cv.wait(lock, [] { return peer_set || terminate_flag.load(); });
             lock.unlock();
@@ -324,16 +304,13 @@ int main() {
             std::cout << "You can now start sending messages. Type '/quit' to exit.\n";
             send_messages(socket, is_host);
         } else {
-            // Client already knows host's endpoint
             std::cout << "You can now start sending messages. Type '/quit' to exit.\n";
             send_messages(socket, is_host, host_endpoint);
         }
 
-        // Signal listener thread to terminate
         terminate_flag.store(true);
-        socket.cancel(); // Interrupt the listener thread if it's blocked
+        socket.cancel(); 
 
-        // Join the listener thread
         if (listener_thread.joinable()) {
             listener_thread.join();
         }
